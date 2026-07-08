@@ -57,29 +57,41 @@ $success = '';
 $error   = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $course_id    = mysqli_real_escape_string($conn, $_POST['course_id'] ?? '');
-    $title        = mysqli_real_escape_string($conn, trim($_POST['title'] ?? ''));
-    $description  = mysqli_real_escape_string($conn, trim($_POST['description'] ?? ''));
-    $due_date     = mysqli_real_escape_string($conn, $_POST['due_date'] ?? '');
+    $course_id    = (int)($_POST['course_id'] ?? 0);
+    $title        = trim($_POST['title'] ?? '');
+    $description  = trim($_POST['description'] ?? '');
+    $due_date     = $_POST['due_date'] ?? '';
     $total_marks  = (int)($_POST['total_marks'] ?? 0);
-    $instructions = mysqli_real_escape_string($conn, trim($_POST['instructions'] ?? ''));
+    $instructions = trim($_POST['instructions'] ?? '');
     $allow_late   = isset($_POST['allow_late']) ? 1 : 0;
-    $status       = mysqli_real_escape_string($conn, $_POST['status'] ?? 'active');
+    $status       = $_POST['status'] ?? 'active';
 
-    if (empty($course_id) || empty($title) || empty($due_date) || $total_marks <= 0) {
+    // Validate status
+    if (!in_array($status, ['active', 'draft', 'closed'])) {
+        $status = 'active';
+    }
+
+    if ($course_id <= 0 || empty($title) || empty($due_date) || $total_marks <= 0) {
         $error = 'Please fill in all required fields.';
     } else {
-        $result = mysqli_query($conn,
+        $stmt = mysqli_prepare($conn,
             "INSERT INTO assignments
              (course_id, title, description, instructions, due_date, total_marks, allow_late_submission, created_by, status, created_at)
-             VALUES
-             ('$course_id', '$title', '$description', '$instructions', '$due_date', '$total_marks', '$allow_late', '$lecturer_id', '$status', NOW())"
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())"
         );
 
-        if ($result) {
-            $success = 'Assignment created successfully!';
+        if ($stmt === false) {
+            $error = 'Database error. Please try again.';
         } else {
-            $error = 'Failed to create assignment. Please try again.';
+            mysqli_stmt_bind_param($stmt, "issssiiis",
+                $course_id, $title, $description, $instructions, $due_date, $total_marks, $allow_late, $lecturer_id, $status
+            );
+
+            if (mysqli_stmt_execute($stmt)) {
+                $success = 'Assignment created successfully!';
+            } else {
+                $error = 'Failed to create assignment. Please try again.';
+            }
         }
     }
 }

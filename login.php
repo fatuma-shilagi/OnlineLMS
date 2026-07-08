@@ -1,5 +1,4 @@
 <?php
-ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 require_once 'includes/config.php';
@@ -14,11 +13,13 @@ if (isLoggedIn()) {
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $email    = trim(mysqli_real_escape_string($conn, $_POST['email']));
-    $password = $_POST['password'];
+    $email    = trim($_POST['email'] ?? '');
+    $password = $_POST['password'] ?? '';
 
-    $query  = "SELECT * FROM users WHERE email = '$email' AND status = 'active'";
-    $result = mysqli_query($conn, $query);
+    $stmt = mysqli_prepare($conn, "SELECT * FROM users WHERE email = ? AND status = 'active'");
+    mysqli_stmt_bind_param($stmt, "s", $email);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
 
     if ($result && mysqli_num_rows($result) == 1) {
         $user = mysqli_fetch_assoc($result);
@@ -30,11 +31,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $_SESSION['role']      = $user['role'];
 
             // Log activity
-            $uid = $user['id'];
+            $uid = (int)$user['id'];
             $ip  = $_SERVER['REMOTE_ADDR'];
             $role = $user['role'];
-            mysqli_query($conn, "INSERT INTO activity_logs (user_id, action, module, details, ip_address)
-                                 VALUES ('$uid', 'Logged in', 'Auth', '$role logged in', '$ip')");
+            $log_stmt = mysqli_prepare($conn,
+                "INSERT INTO activity_logs (user_id, action, module, details, ip_address, created_at)
+                 VALUES (?, 'Logged in', 'Auth', ?, ?, NOW())"
+            );
+            $details = "$role logged in";
+            mysqli_stmt_bind_param($log_stmt, "iss", $uid, $details, $ip);
+            mysqli_stmt_execute($log_stmt);
 
             // Redirect based on role
             redirectByRole();

@@ -20,35 +20,55 @@ $error_msg   = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['grade_submission'])) {
     $submission_id  = (int) $_POST['submission_id'];
     $marks_obtained = (float) $_POST['marks_obtained'];
-    $feedback       = mysqli_real_escape_string($conn, trim($_POST['feedback'] ?? ''));
+    $feedback       = trim($_POST['feedback'] ?? '');
 
-    // Verify submission belongs to lecturer's assignment
-    $verify = mysqli_fetch_assoc(mysqli_query($conn,
-        "SELECT s.id, a.total_marks FROM submissions s
+    // Verify submission belongs to lecturer's assignment and get student_id, assignment_id, total_marks
+    $stmt = mysqli_prepare($conn,
+        "SELECT s.id, s.student_id, s.assignment_id, a.total_marks
+         FROM submissions s
          INNER JOIN assignments a ON s.assignment_id = a.id
-         WHERE s.id = '$submission_id' AND a.created_by = '$lecturer_id'"
-    ));
+         WHERE s.id = ? AND a.created_by = ?"
+    );
+    mysqli_stmt_bind_param($stmt, "ii", $submission_id, $lecturer_id);
+    mysqli_stmt_execute($stmt);
+    $verify = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
 
     if (!$verify) {
         $error_msg = 'Submission not found or access denied.';
     } elseif ($marks_obtained < 0 || $marks_obtained > $verify['total_marks']) {
         $error_msg = "Marks must be between 0 and {$verify['total_marks']}.";
     } else {
-        // Upsert grade
-        $exists = mysqli_fetch_assoc(mysqli_query($conn,
-            "SELECT id FROM grades WHERE submission_id = '$submission_id'"
-        ));
+        // Check if grade exists
+        $stmt = mysqli_prepare($conn, "SELECT id FROM grades WHERE submission_id = ?");
+        mysqli_stmt_bind_param($stmt, "i", $submission_id);
+        mysqli_stmt_execute($stmt);
+        $exists = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+
         if ($exists) {
-            mysqli_query($conn,
+            // Update existing grade
+            $stmt = mysqli_prepare($conn,
                 "UPDATE grades
-                 SET marks_obtained = '$marks_obtained', feedback = '$feedback', graded_at = NOW()
-                 WHERE submission_id = '$submission_id'"
+                 SET marks_obtained = ?, feedback = ?, graded_at = NOW()
+                 WHERE submission_id = ?"
             );
+            mysqli_stmt_bind_param($stmt, "dsi", $marks_obtained, $feedback, $submission_id);
+            mysqli_stmt_execute($stmt);
         } else {
-            mysqli_query($conn,
-                "INSERT INTO grades (submission_id, marks_obtained, feedback, graded_by, graded_at)
-                 VALUES ('$submission_id', '$marks_obtained', '$feedback', '$lecturer_id', NOW())"
+            // Insert new grade with all required fields
+            $stmt = mysqli_prepare($conn,
+                "INSERT INTO grades (submission_id, student_id, assignment_id, marks_obtained, total_marks, feedback, graded_by, graded_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW())"
             );
+            mysqli_stmt_bind_param($stmt, "iiiddis",
+                $submission_id,
+                $verify['student_id'],
+                $verify['assignment_id'],
+                $marks_obtained,
+                $verify['total_marks'],
+                $feedback,
+                $lecturer_id
+            );
+            mysqli_stmt_execute($stmt);
         }
         $success_msg = 'Grade saved successfully!';
     }

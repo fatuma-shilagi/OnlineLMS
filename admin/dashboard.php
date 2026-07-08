@@ -9,9 +9,10 @@ $admin_id   = $_SESSION['user_id'];
 $admin_name = $_SESSION['user_name'];
 
 // ── Fetch admin info ─────────────────────────────────────
-$admin = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT * FROM users WHERE id = '$admin_id'")
-);
+$stmt = mysqli_prepare($conn, "SELECT * FROM users WHERE id = ?");
+mysqli_stmt_bind_param($stmt, "i", $admin_id);
+mysqli_stmt_execute($stmt);
+$admin = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
 
 // ── Total users ──────────────────────────────────────────
 $total_users = mysqli_fetch_assoc(
@@ -97,7 +98,6 @@ $all_courses = mysqli_query($conn,
      ORDER BY c.created_at DESC
      LIMIT 6"
 );
-
 // ── Recent notifications ─────────────────────────────────
 $recent_notifications = mysqli_query($conn,
     "SELECT n.*, u.name AS sender_name

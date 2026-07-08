@@ -9,123 +9,140 @@ $student_id   = $_SESSION['user_id'];
 $student_name = $_SESSION['user_name'];
 
 // ── Fetch student info ───────────────────────────────────
-$student_query = mysqli_query($conn, "SELECT * FROM users WHERE id = '$student_id'");
-$student       = mysqli_fetch_assoc($student_query);
+$stmt = mysqli_prepare($conn, "SELECT * FROM users WHERE id = ?");
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$student = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
 
 // ── Count enrolled courses ───────────────────────────────
-$courses_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM course_enrollments
-                          WHERE student_id = '$student_id' AND status = 'enrolled'")
-)['total'];
+$stmt = mysqli_prepare($conn, "SELECT COUNT(*) as total FROM course_enrollments WHERE student_id = ? AND status = 'enrolled'");
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$courses_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count available notes (from enrolled courses) ────────
-$notes_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM notes n
-                          INNER JOIN course_enrollments ce ON n.course_id = ce.course_id
-                          WHERE ce.student_id = '$student_id'
-                          AND ce.status = 'enrolled'
-                          AND n.status = 'active'")
-)['total'];
+$stmt = mysqli_prepare($conn,
+    "SELECT COUNT(*) as total FROM notes n
+     INNER JOIN course_enrollments ce ON n.course_id = ce.course_id
+     WHERE ce.student_id = ? AND ce.status = 'enrolled' AND n.status = 'active'"
+);
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$notes_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count pending assignments ────────────────────────────
-$assignments_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM assignments a
-                          INNER JOIN course_enrollments ce ON a.course_id = ce.course_id
-                          LEFT JOIN submissions s ON a.id = s.assignment_id
-                              AND s.student_id = '$student_id'
-                          WHERE ce.student_id = '$student_id'
-                          AND ce.status = 'enrolled'
-                          AND a.status = 'active'
-                          AND a.due_date >= NOW()
-                          AND s.id IS NULL")
-)['total'];
+$stmt = mysqli_prepare($conn,
+    "SELECT COUNT(*) as total FROM assignments a
+     INNER JOIN course_enrollments ce ON a.course_id = ce.course_id
+     LEFT JOIN submissions s ON a.id = s.assignment_id AND s.student_id = ?
+     WHERE ce.student_id = ? AND ce.status = 'enrolled'
+     AND a.status = 'active' AND a.due_date >= NOW() AND s.id IS NULL"
+);
+mysqli_stmt_bind_param($stmt, "ii", $student_id, $student_id);
+mysqli_stmt_execute($stmt);
+$assignments_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count unread notifications ───────────────────────────
-$notifications_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM notifications n
-                          LEFT JOIN notification_reads nr ON n.id = nr.notification_id
-                              AND nr.user_id = '$student_id'
-                          WHERE (n.target_role = 'student' OR n.target_role = 'all')
-                          AND nr.id IS NULL")
-)['total'];
+$stmt = mysqli_prepare($conn,
+    "SELECT COUNT(*) as total FROM notifications n
+     LEFT JOIN notification_reads nr ON n.id = nr.notification_id AND nr.user_id = ?
+     WHERE (n.target_role = 'student' OR n.target_role = 'all') AND nr.id IS NULL"
+);
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$notifications_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count submitted assignments ──────────────────────────
-$submitted_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM submissions
-                          WHERE student_id = '$student_id'")
-)['total'];
+$stmt = mysqli_prepare($conn, "SELECT COUNT(*) as total FROM submissions WHERE student_id = ?");
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$submitted_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count graded assignments ─────────────────────────────
-$graded_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM grades
-                          WHERE student_id = '$student_id'")
-)['total'];
+$stmt = mysqli_prepare($conn, "SELECT COUNT(*) as total FROM grades WHERE student_id = ?");
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$graded_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Recent notes (last 5) ────────────────────────────────
-$recent_notes = mysqli_query($conn,
+$stmt = mysqli_prepare($conn,
     "SELECT n.*, c.course_name, c.course_code, u.name AS lecturer_name
      FROM notes n
      INNER JOIN courses c ON n.course_id = c.id
      INNER JOIN users u ON n.uploaded_by = u.id
      INNER JOIN course_enrollments ce ON n.course_id = ce.course_id
-     WHERE ce.student_id = '$student_id'
-     AND ce.status = 'enrolled'
-     AND n.status = 'active'
+     WHERE ce.student_id = ? AND ce.status = 'enrolled' AND n.status = 'active'
      ORDER BY n.created_at DESC
      LIMIT 5"
 );
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$recent_notes = mysqli_stmt_get_result($stmt);
 
 // ── Upcoming assignments (next 5) ────────────────────────
-$upcoming_assignments = mysqli_query($conn,
+$stmt = mysqli_prepare($conn,
     "SELECT a.*, c.course_name, c.course_code,
             s.id AS submitted,
             TIMESTAMPDIFF(HOUR, NOW(), a.due_date) AS hours_left
      FROM assignments a
      INNER JOIN courses c ON a.course_id = c.id
      INNER JOIN course_enrollments ce ON a.course_id = ce.course_id
-     LEFT JOIN submissions s ON a.id = s.assignment_id
-         AND s.student_id = '$student_id'
-     WHERE ce.student_id = '$student_id'
-     AND ce.status = 'enrolled'
-     AND a.status = 'active'
-     AND a.due_date >= NOW()
+     LEFT JOIN submissions s ON a.id = s.assignment_id AND s.student_id = ?
+     WHERE ce.student_id = ? AND ce.status = 'enrolled'
+     AND a.status = 'active' AND a.due_date >= NOW()
      ORDER BY a.due_date ASC
      LIMIT 5"
 );
+mysqli_stmt_bind_param($stmt, "ii", $student_id, $student_id);
+mysqli_stmt_execute($stmt);
+$upcoming_assignments = mysqli_stmt_get_result($stmt);
 
 // ── Recent notifications (last 5) ────────────────────────
-$recent_notifications = mysqli_query($conn,
+$stmt = mysqli_prepare($conn,
     "SELECT n.*, u.name AS sender_name,
             nr.id AS is_read
      FROM notifications n
      INNER JOIN users u ON n.sent_by = u.id
-     LEFT JOIN notification_reads nr ON n.id = nr.notification_id
-         AND nr.user_id = '$student_id'
+     LEFT JOIN notification_reads nr ON n.id = nr.notification_id AND nr.user_id = ?
      WHERE (n.target_role = 'student' OR n.target_role = 'all')
      ORDER BY n.created_at DESC
      LIMIT 5"
 );
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$recent_notifications = mysqli_stmt_get_result($stmt);
 
 // ── My enrolled courses ──────────────────────────────────
-$my_courses = mysqli_query($conn,
+$stmt = mysqli_prepare($conn,
     "SELECT c.*, u.name AS lecturer_name,
             (SELECT COUNT(*) FROM notes WHERE course_id = c.id AND status = 'active') AS notes_count,
             (SELECT COUNT(*) FROM assignments WHERE course_id = c.id AND status = 'active') AS assignments_count
      FROM courses c
      INNER JOIN course_enrollments ce ON c.id = ce.course_id
      INNER JOIN users u ON c.lecturer_id = u.id
-     WHERE ce.student_id = '$student_id'
-     AND ce.status = 'enrolled'
+     WHERE ce.student_id = ? AND ce.status = 'enrolled'
      ORDER BY c.course_name ASC
      LIMIT 6"
 );
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$my_courses = mysqli_stmt_get_result($stmt);
 
-// ── Average grade ────────────────────────────────────────
-$avg_grade = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT AVG((marks_obtained / total_marks) * 100) as avg
-                          FROM grades WHERE student_id = '$student_id'")
-)['avg'];
-$avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
+// ── Recent grades ────────────────────────────────────────
+$stmt = mysqli_prepare($conn,
+    "SELECT g.*, a.title AS assignment_title, a.total_marks,
+            c.course_code, s.submitted_at
+     FROM grades g
+     INNER JOIN assignments a ON g.assignment_id = a.id
+     INNER JOIN courses c ON a.course_id = c.id
+     INNER JOIN submissions s ON g.submission_id = s.id
+     WHERE g.student_id = ?
+     ORDER BY g.graded_at DESC
+     LIMIT 5"
+);
+mysqli_stmt_bind_param($stmt, "i", $student_id);
+mysqli_stmt_execute($stmt);
+$recent_grades = mysqli_stmt_get_result($stmt);
 ?>
 
 <!DOCTYPE html>
@@ -133,7 +150,7 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Dashboard - OnlineLMS</title>
+    <title>Dashboard - OnlineLMS</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <style>
@@ -162,7 +179,7 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
             min-height: 100vh;
         }
 
-        /* ── Sidebar ── */
+        /* Sidebar */
         .sidebar {
             width: var(--sidebar-w);
             background: rgba(255,255,255,0.03);
@@ -216,14 +233,13 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
         }
 
         .sidebar-profile .role-badge {
-            background: #00d4ff;
-            color: #ffffff;
-            border: 1px solid rgba(0,0,0,0.06);
+            background: rgba(0,212,255,0.15);
+            color: var(--accent);
+            border: 1px solid rgba(0,212,255,0.3);
             border-radius: 20px;
-            padding: 3px 10px;
-            font-size: 0.72rem;
-            font-weight: 700;
-            box-shadow: 0 1px 0 rgba(0,0,0,0.04) inset;
+            padding: 1px 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
         }
 
         .sidebar-nav {
@@ -299,7 +315,7 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
 
         .sidebar-footer a:hover { opacity: 0.75; }
 
-        /* ── Main Content ── */
+        /* Main Content */
         .main-content {
             margin-left: var(--sidebar-w);
             flex: 1;
@@ -308,7 +324,7 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
             min-height: 100vh;
         }
 
-        /* ── Topbar ── */
+        /* Topbar */
         .topbar {
             background: rgba(255,255,255,0.03);
             border-bottom: 1px solid var(--border);
@@ -374,13 +390,10 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
             cursor: pointer;
         }
 
-        /* ── Page Body ── */
-        .page-body {
-            padding: 28px;
-            flex: 1;
-        }
+        /* Page Body */
+        .page-body { padding: 28px; flex: 1; }
 
-        /* ── Stat Cards ── */
+        /* Stat Cards */
         .stat-card {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -390,16 +403,6 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
             align-items: center;
             gap: 16px;
             transition: all 0.3s;
-            text-decoration: none;
-            color: var(--text);
-        }
-
-        .stat-card:hover {
-            background: var(--bg-hover);
-            border-color: rgba(255,255,255,0.15);
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-            color: var(--text);
         }
 
         .stat-icon {
@@ -418,7 +421,6 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
         .stat-icon.yellow { background: rgba(255,217,61,0.15);  color: var(--yellow); }
         .stat-icon.red    { background: rgba(255,107,107,0.15); color: var(--red);    }
         .stat-icon.purple { background: rgba(180,143,252,0.15); color: var(--purple); }
-        .stat-icon.teal   { background: rgba(32,201,151,0.15);  color: #20c997;       }
 
         .stat-info h3 {
             font-size: 1.7rem;
@@ -433,16 +435,17 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
             margin: 0;
         }
 
-        /* ── Section Cards ── */
+        /* Section Card */
         .section-card {
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 16px;
             overflow: hidden;
+            margin-bottom: 24px;
         }
 
         .section-header {
-            padding: 18px 22px;
+            padding: 16px 20px;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
@@ -451,24 +454,15 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
 
         .section-header h6 {
             font-weight: 700;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             margin: 0;
             display: flex;
             align-items: center;
             gap: 8px;
         }
 
-        .section-header a {
-            color: var(--accent);
-            font-size: 0.8rem;
-            text-decoration: none;
-        }
-
-        .section-header a:hover { text-decoration: underline; }
-
-        /* ── List Items ── */
-        .list-item {
-            padding: 14px 22px;
+        .item-row {
+            padding: 14px 20px;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
@@ -476,42 +470,24 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
             transition: background 0.2s;
         }
 
-        .list-item:last-child { border-bottom: none; }
-        .list-item:hover { background: var(--bg-hover); }
+        .item-row:last-child { border-bottom: none; }
+        .item-row:hover { background: var(--bg-hover); }
 
         .item-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 10px;
+            width: 42px;
+            height: 42px;
+            border-radius: 11px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1rem;
+            font-size: 1.1rem;
             flex-shrink: 0;
         }
 
-        .item-icon.pdf    { background: rgba(255,107,107,0.15); color: var(--red);    }
-        .item-icon.assign { background: rgba(255,217,61,0.15);  color: var(--yellow); }
-        .item-icon.notif  { background: rgba(0,212,255,0.15);   color: var(--accent); }
+        .item-info { flex: 1; min-width: 200px; }
+        .item-title { font-size: 0.875rem; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+        .item-sub { font-size: 0.74rem; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
 
-        .item-title {
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: var(--text);
-            margin-bottom: 2px;
-        }
-
-        .item-sub {
-            font-size: 0.75rem;
-            color: var(--muted);
-        }
-
-        .item-right {
-            margin-left: auto;
-            text-align: right;
-        }
-
-        /* ── Badges ── */
         .badge-glass {
             padding: 4px 12px;
             border-radius: 20px;
@@ -519,185 +495,36 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
             font-weight: 600;
         }
 
-        .badge-blue   { background: rgba(0,212,255,0.15);  color: var(--accent); border: 1px solid rgba(0,212,255,0.3);  }
+        .badge-blue   { background: rgba(0,212,255,0.15);  color: var(--accent); border: 1px solid rgba(0,212,255,0.3); }
         .badge-green  { background: rgba(107,203,119,0.15); color: var(--green);  border: 1px solid rgba(107,203,119,0.3); }
-        .badge-yellow { background: rgba(255,217,61,0.15);  color: var(--yellow); border: 1px solid rgba(255,217,61,0.3);  }
-        .badge-red    { background: rgba(255,107,107,0.15); color: var(--red);    border: 1px solid rgba(255,107,107,0.3);  }
-        .badge-purple { background: rgba(180,143,252,0.15); color: var(--purple); border: 1px solid rgba(180,143,252,0.3); }
+        .badge-yellow { background: rgba(255,217,61,0.15);  color: var(--yellow); border: 1px solid rgba(255,217,61,0.3); }
+        .badge-red    { background: rgba(255,107,107,0.15); color: var(--red);    border: 1px solid rgba(255,107,107,0.3); }
 
-        /* ── Course Cards ── */
-        .course-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 18px;
-            transition: all 0.3s;
-            height: 100%;
-        }
+        .empty-state { padding: 40px 20px; text-align: center; color: var(--muted); }
+        .empty-state i { font-size: 1.8rem; margin-bottom: 8px; opacity: 0.35; display: block; }
+        .empty-state p { font-size: 0.82rem; margin: 0; }
 
-        .course-card:hover {
-            background: var(--bg-hover);
-            border-color: var(--accent);
-            transform: translateY(-2px);
-        }
-
-        .course-code {
-            background: rgba(0,212,255,0.12);
-            color: var(--accent);
-            border-radius: 8px;
-            padding: 3px 10px;
-            font-size: 0.75rem;
-            font-weight: 700;
-            display: inline-block;
-            margin-bottom: 8px;
-        }
-
-        .course-name {
-            font-weight: 700;
-            font-size: 0.9rem;
-            margin-bottom: 5px;
-        }
-
-        .course-lecturer {
-            color: var(--muted);
-            font-size: 0.78rem;
-            margin-bottom: 12px;
-        }
-
-        .course-meta {
-            display: flex;
-            gap: 12px;
-        }
-
-        .course-meta span {
-            color: var(--muted);
-            font-size: 0.75rem;
-        }
-
-        .course-meta span i { margin-right: 3px; }
-
-        /* ── Grade Arc ── */
-        .grade-arc {
-            text-align: center;
-            padding: 20px;
-        }
-
-        .arc-circle {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            border: 6px solid var(--border);
-            border-top-color: var(--accent);
-            border-right-color: var(--accent);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 10px;
-        }
-
-        .arc-value {
-            font-size: 1.4rem;
-            font-weight: 800;
-            color: var(--accent);
-        }
-
-        /* ── Empty State ── */
-        .empty-state {
-            padding: 35px 20px;
-            text-align: center;
-            color: var(--muted);
-        }
-
-        .empty-state i {
-            font-size: 2rem;
-            margin-bottom: 8px;
-            opacity: 0.4;
-        }
-
-        .empty-state p { font-size: 0.85rem; margin: 0; }
-
-        /* ── Progress Bar ── */
-        .progress-thin {
-            height: 5px;
-            background: var(--border);
-            border-radius: 3px;
-            overflow: hidden;
-            margin-top: 8px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            border-radius: 3px;
-            background: linear-gradient(90deg, var(--accent), #0099cc);
-        }
-
-        /* ── Welcome Banner ── */
-        .welcome-banner {
-            background: linear-gradient(135deg, rgba(0,212,255,0.12), rgba(0,153,204,0.06));
-            border: 1px solid rgba(0,212,255,0.2);
-            border-radius: 16px;
-            padding: 24px 28px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 28px;
-        }
-
-        .welcome-banner h4 {
-            font-weight: 800;
-            font-size: 1.3rem;
-            margin-bottom: 4px;
-        }
-
-        .welcome-banner p {
-            color: var(--muted);
-            font-size: 0.875rem;
-            margin: 0;
-        }
-
-        .welcome-banner .emoji {
-            font-size: 3rem;
-        }
-
-        /* ── Responsive ── */
+        /* Responsive */
         @media (max-width: 768px) {
-            .sidebar {
-                transform: translateX(-100%);
-            }
-            .sidebar.open {
-                transform: translateX(0);
-            }
-            .main-content {
-                margin-left: 0;
-            }
-            .hamburger {
-                display: block;
-            }
-            .welcome-banner .emoji {
-                display: none;
-            }
-            .page-body {
-                padding: 16px;
-            }
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.open { transform: translateX(0); }
+            .main-content { margin-left: 0; }
+            .hamburger { display: block; }
+            .page-body { padding: 16px; }
         }
     </style>
 </head>
 <body>
 
-<!-- ══════════════════════════════════════════
-     SIDEBAR
-══════════════════════════════════════════ -->
+<!-- Sidebar -->
 <aside class="sidebar" id="sidebar">
-
-    <!-- Brand -->
     <div class="sidebar-brand">
         <h5><i class="bi bi-mortarboard-fill me-2"></i>OnlineLMS</h5>
         <span>Learning Management System</span>
     </div>
 
-    <!-- Profile -->
     <div class="sidebar-profile">
-        <img src="../uploads/profiles/<?= htmlspecialchars($student['profile_picture']) ?>"
+        <img src="../uploads/profiles/<?= htmlspecialchars($student['profile_picture'] ?? '') ?>"
              onerror="this.src='https://ui-avatars.com/api/?name=<?= urlencode($student_name) ?>&background=00d4ff&color=fff&size=46'"
              alt="Profile">
         <div>
@@ -706,7 +533,6 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
         </div>
     </div>
 
-    <!-- Navigation -->
     <nav class="sidebar-nav">
         <div class="nav-section">Main Menu</div>
         <a href="dashboard.php" class="active">
@@ -750,323 +576,224 @@ $avg_grade = $avg_grade ? round($avg_grade, 1) : 0;
         </a>
     </nav>
 
-    <!-- Logout -->
     <div class="sidebar-footer">
-    <a href="../logout.php"
-       onclick="return confirm('Are you sure you want to logout?')"
-       style="display:flex; align-items:center; gap:10px;
-              color:var(--red); text-decoration:none;
-              font-size:0.875rem; font-weight:500; padding:8px 0;">
-        <i class="bi bi-box-arrow-left"></i> Logout
-    </a>
-</div>
+        <a href="../logout.php" onclick="return confirm('Are you sure you want to logout?')">
+            <i class="bi bi-box-arrow-left"></i> Logout
+        </a>
+    </div>
 </aside>
 
-<!-- ══════════════════════════════════════════
-     MAIN CONTENT
-══════════════════════════════════════════ -->
+<!-- Main Content -->
 <div class="main-content">
-
-    <!-- Topbar -->
     <div class="topbar">
         <div class="d-flex align-items-center gap-3">
-            <button class="hamburger" id="hamburger">
-                <i class="bi bi-list"></i>
-            </button>
+            <button class="hamburger" id="hamburger"><i class="bi bi-list"></i></button>
             <div class="topbar-left">
-                <h6>Student Dashboard</h6>
+                <h6>Dashboard</h6>
                 <p><?= date('l, d F Y') ?></p>
             </div>
         </div>
         <div class="topbar-right">
             <a href="notifications.php" class="notif-btn">
                 <i class="bi bi-bell"></i>
-                <?php if ($notifications_count > 0): ?>
-                    <span class="notif-dot"></span>
-                <?php endif; ?>
+                <?php if ($notifications_count > 0): ?><span class="notif-dot"></span><?php endif; ?>
             </a>
             <a href="profile.php" style="text-decoration:none;">
-                <img src="../uploads/profiles/<?= htmlspecialchars($student['profile_picture']) ?>"
+                <img src="../uploads/profiles/<?= htmlspecialchars($student['profile_picture'] ?? '') ?>"
                      onerror="this.src='https://ui-avatars.com/api/?name=<?= urlencode($student_name) ?>&background=00d4ff&color=fff&size=36'"
                      style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--accent);">
             </a>
         </div>
     </div>
 
-    <!-- Page Body -->
     <div class="page-body">
-
-        <!-- Welcome Banner -->
-        <div class="welcome-banner">
-            <div>
-                <h4>Welcome back, <?= htmlspecialchars(explode(' ', $student_name)[0]) ?>! 👋</h4>
-                <p>You have
-                    <strong style="color:var(--red)"><?= $assignments_count ?> pending assignment(s)</strong> and
-                    <strong style="color:var(--accent)"><?= $notifications_count ?> unread notification(s)</strong>.
-                </p>
-            </div>
-            <div class="emoji">🎓</div>
-        </div>
-
-        <!-- ── Stat Cards Row ── -->
+        <!-- Stat Cards -->
         <div class="row g-3 mb-4">
-            <div class="col-6 col-lg-2">
-                <a href="courses.php" class="stat-card">
+            <div class="col-6 col-lg-3">
+                <div class="stat-card">
                     <div class="stat-icon blue"><i class="bi bi-book"></i></div>
                     <div class="stat-info">
                         <h3><?= $courses_count ?></h3>
-                        <p>Courses</p>
+                        <p>Enrolled Courses</p>
                     </div>
-                </a>
+                </div>
             </div>
-            <div class="col-6 col-lg-2">
-                <a href="notes.php" class="stat-card">
-                    <div class="stat-icon red"><i class="bi bi-file-earmark-text"></i></div>
-                    <div class="stat-info">
-                        <h3><?= $notes_count ?></h3>
-                        <p>Notes</p>
-                    </div>
-                </a>
-            </div>
-            <div class="col-6 col-lg-2">
-                <a href="assignments.php" class="stat-card">
-                    <div class="stat-icon yellow"><i class="bi bi-clipboard2"></i></div>
+            <div class="col-6 col-lg-3">
+                <div class="stat-card">
+                    <div class="stat-icon yellow"><i class="bi bi-clipboard2-check"></i></div>
                     <div class="stat-info">
                         <h3><?= $assignments_count ?></h3>
-                        <p>Pending</p>
+                        <p>Pending Assignments</p>
                     </div>
-                </a>
+                </div>
             </div>
-            <div class="col-6 col-lg-2">
-                <a href="assignments.php" class="stat-card">
+            <div class="col-6 col-lg-3">
+                <div class="stat-card">
                     <div class="stat-icon green"><i class="bi bi-check2-circle"></i></div>
                     <div class="stat-info">
                         <h3><?= $submitted_count ?></h3>
                         <p>Submitted</p>
                     </div>
-                </a>
+                </div>
             </div>
-            <div class="col-6 col-lg-2">
-                <a href="assignments.php" class="stat-card">
+            <div class="col-6 col-lg-3">
+                <div class="stat-card">
                     <div class="stat-icon purple"><i class="bi bi-star"></i></div>
                     <div class="stat-info">
-                        <h3><?= $avg_grade ?>%</h3>
-                        <p>Avg Grade</p>
+                        <h3><?= $graded_count ?></h3>
+                        <p>Graded</p>
                     </div>
-                </a>
-            </div>
-            <div class="col-6 col-lg-2">
-                <a href="notifications.php" class="stat-card">
-                    <div class="stat-icon teal"><i class="bi bi-bell"></i></div>
-                    <div class="stat-info">
-                        <h3><?= $notifications_count ?></h3>
-                        <p>Unread</p>
-                    </div>
-                </a>
+                </div>
             </div>
         </div>
 
-        <!-- ── Main Grid ── -->
-        <div class="row g-4 mb-4">
+        <div class="row g-4">
+            <!-- Upcoming Assignments -->
+            <div class="col-lg-6">
+                <div class="section-card">
+                    <div class="section-header">
+                        <h6><i class="bi bi-calendar-event" style="color:var(--yellow)"></i> Upcoming Assignments</h6>
+                    </div>
+                    <?php if (mysqli_num_rows($upcoming_assignments) > 0): ?>
+                        <?php while ($a = mysqli_fetch_assoc($upcoming_assignments)): ?>
+                            <div class="item-row">
+                                <div class="item-icon" style="background:rgba(255,217,61,0.15);color:var(--yellow)">
+                                    <i class="bi bi-clipboard2"></i>
+                                </div>
+                                <div class="item-info">
+                                    <div class="item-title"><?= htmlspecialchars($a['title']) ?></div>
+                                    <div class="item-sub">
+                                        <span class="badge-glass badge-blue"><?= htmlspecialchars($a['course_code']) ?></span>
+                                        <span><i class="bi bi-calendar"></i> <?= date('d M Y', strtotime($a['due_date'])) ?></span>
+                                    </div>
+                                </div>
+                                <?php if (!$a['submitted']): ?>
+                                    <a href="submit_assignment.php?id=<?= $a['id'] ?>" class="badge-glass badge-yellow">Submit</a>
+                                <?php else: ?>
+                                    <span class="badge-glass badge-green">Submitted</span>
+                                <?php endif; ?>
+                            </div>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <div class="empty-state">
+                            <i class="bi bi-calendar-check"></i>
+                            <p>No upcoming assignments.</p>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
 
             <!-- Recent Notes -->
             <div class="col-lg-6">
                 <div class="section-card">
                     <div class="section-header">
-                        <h6><i class="bi bi-file-earmark-text" style="color:var(--red)"></i> Recent Notes</h6>
-                        <a href="notes.php">View All <i class="bi bi-arrow-right"></i></a>
+                        <h6><i class="bi bi-file-earmark-text" style="color:var(--accent)"></i> Recent Notes</h6>
                     </div>
                     <?php if (mysqli_num_rows($recent_notes) > 0): ?>
-                        <?php while ($note = mysqli_fetch_assoc($recent_notes)): ?>
-                            <div class="list-item">
-                                <div class="item-icon pdf">
-                                    <i class="bi bi-file-earmark-pdf"></i>
+                        <?php while ($n = mysqli_fetch_assoc($recent_notes)): ?>
+                            <div class="item-row">
+                                <div class="item-icon" style="background:rgba(0,212,255,0.15);color:var(--accent)">
+                                    <i class="bi bi-file-earmark-text"></i>
                                 </div>
-                                <div style="flex:1; min-width:0;">
-                                    <div class="item-title text-truncate">
-                                        <?= htmlspecialchars($note['title']) ?>
-                                    </div>
+                                <div class="item-info">
+                                    <div class="item-title"><?= htmlspecialchars($n['title']) ?></div>
                                     <div class="item-sub">
-                                        <span class="badge-glass badge-blue me-1"><?= htmlspecialchars($note['course_code']) ?></span>
-                                        <?= htmlspecialchars($note['lecturer_name']) ?>
+                                        <span class="badge-glass badge-blue"><?= htmlspecialchars($n['course_code']) ?></span>
+                                        <span><i class="bi bi-person"></i> <?= htmlspecialchars($n['lecturer_name']) ?></span>
                                     </div>
                                 </div>
-                                <div class="item-right">
-                                    <a href="notes.php?download=<?= $note['id'] ?>"
-                                       class="badge-glass badge-green"
-                                       style="text-decoration:none;">
-                                        <i class="bi bi-download me-1"></i>PDF
+                                <?php if (!empty($n['file_name'])): ?>
+                                    <a href="notes.php?download=<?= $n['id'] ?>" class="badge-glass badge-green">
+                                        <i class="bi bi-download"></i>
                                     </a>
-                                    <div class="item-sub mt-1">
-                                        <?= date('d M', strtotime($note['created_at'])) ?>
-                                    </div>
-                                </div>
+                                <?php endif; ?>
                             </div>
                         <?php endwhile; ?>
                     <?php else: ?>
                         <div class="empty-state">
-                            <i class="bi bi-file-earmark-text d-block"></i>
+                            <i class="bi bi-file-earmark-x"></i>
                             <p>No notes available yet.</p>
                         </div>
                     <?php endif; ?>
                 </div>
             </div>
 
-            <!-- Upcoming Assignments -->
+            <!-- My Courses -->
             <div class="col-lg-6">
                 <div class="section-card">
                     <div class="section-header">
-                        <h6><i class="bi bi-clipboard2-check" style="color:var(--yellow)"></i> Upcoming Assignments</h6>
-                        <a href="assignments.php">View All <i class="bi bi-arrow-right"></i></a>
+                        <h6><i class="bi bi-book" style="color:var(--green)"></i> My Courses</h6>
                     </div>
-                    <?php if (mysqli_num_rows($upcoming_assignments) > 0): ?>
-                        <?php while ($assign = mysqli_fetch_assoc($upcoming_assignments)): ?>
-                            <?php
-                                $hours = $assign['hours_left'];
-                                if ($hours <= 24)       { $urgency = 'badge-red';    $urgency_txt = 'Due Today'; }
-                                elseif ($hours <= 72)   { $urgency = 'badge-yellow'; $urgency_txt = 'Due Soon'; }
-                                else                    { $urgency = 'badge-blue';   $urgency_txt = date('d M', strtotime($assign['due_date'])); }
-                            ?>
-                            <div class="list-item">
-                                <div class="item-icon assign">
-                                    <i class="bi bi-clipboard2"></i>
+                    <?php if (mysqli_num_rows($my_courses) > 0): ?>
+                        <?php while ($c = mysqli_fetch_assoc($my_courses)): ?>
+                            <div class="item-row">
+                                <div class="item-icon" style="background:rgba(107,203,119,0.15);color:var(--green)">
+                                    <i class="bi bi-book"></i>
                                 </div>
-                                <div style="flex:1; min-width:0;">
-                                    <div class="item-title text-truncate">
-                                        <?= htmlspecialchars($assign['title']) ?>
-                                    </div>
+                                <div class="item-info">
+                                    <div class="item-title"><?= htmlspecialchars($c['course_name']) ?></div>
                                     <div class="item-sub">
-                                        <span class="badge-glass badge-blue me-1"><?= htmlspecialchars($assign['course_code']) ?></span>
-                                        <?= $assign['total_marks'] ?> marks
-                                    </div>
-                                </div>
-                                <div class="item-right">
-                                    <?php if ($assign['submitted']): ?>
-                                        <span class="badge-glass badge-green">Submitted</span>
-                                    <?php else: ?>
-                                        <span class="badge-glass <?= $urgency ?>"><?= $urgency_txt ?></span>
-                                        <div class="mt-1">
-                                            <a href="submit_assignment.php?id=<?= $assign['id'] ?>"
-                                               class="badge-glass badge-yellow"
-                                               style="text-decoration:none; font-size:0.7rem;">
-                                                <i class="bi bi-upload me-1"></i>Submit
-                                            </a>
-                                        </div>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        <?php endwhile; ?>
-                    <?php else: ?>
-                        <div class="empty-state">
-                            <i class="bi bi-clipboard2-check d-block"></i>
-                            <p>No upcoming assignments.</p>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-
-        <!-- ── Second Row ── -->
-        <div class="row g-4 mb-4">
-
-            <!-- Recent Notifications -->
-            <div class="col-lg-4">
-                <div class="section-card h-100">
-                    <div class="section-header">
-                        <h6><i class="bi bi-bell" style="color:var(--accent)"></i> Notifications</h6>
-                        <a href="notifications.php">View All <i class="bi bi-arrow-right"></i></a>
-                    </div>
-                    <?php if (mysqli_num_rows($recent_notifications) > 0): ?>
-                        <?php while ($notif = mysqli_fetch_assoc($recent_notifications)): ?>
-                            <div class="list-item" style="<?= !$notif['is_read'] ? 'border-left:3px solid var(--accent);' : '' ?>">
-                                <div class="item-icon notif">
-                                    <?php
-                                        $icons = [
-                                            'note'         => 'bi-file-earmark-text',
-                                            'assignment'   => 'bi-clipboard2',
-                                            'grade'        => 'bi-star',
-                                            'announcement' => 'bi-megaphone',
-                                            'general'      => 'bi-bell'
-                                        ];
-                                        $icon = $icons[$notif['type']] ?? 'bi-bell';
-                                    ?>
-                                    <i class="bi <?= $icon ?>"></i>
-                                </div>
-                                <div style="flex:1; min-width:0;">
-                                    <div class="item-title text-truncate">
-                                        <?= htmlspecialchars($notif['title']) ?>
-                                        <?php if (!$notif['is_read']): ?>
-                                            <span style="width:7px;height:7px;background:var(--accent);border-radius:50%;display:inline-block;margin-left:4px;"></span>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="item-sub text-truncate">
-                                        <?= htmlspecialchars(substr($notif['message'], 0, 45)) ?>...
+                                        <span class="badge-glass badge-blue"><?= htmlspecialchars($c['course_code']) ?></span>
+                                        <span><i class="bi bi-person"></i> <?= htmlspecialchars($c['lecturer_name']) ?></span>
+                                        <span><i class="bi bi-file-text"></i> <?= $c['notes_count'] ?> notes</span>
                                     </div>
                                 </div>
                             </div>
                         <?php endwhile; ?>
                     <?php else: ?>
                         <div class="empty-state">
-                            <i class="bi bi-bell-slash d-block"></i>
-                            <p>No notifications yet.</p>
+                            <i class="bi bi-book"></i>
+                            <p>You are not enrolled in any courses yet.</p>
                         </div>
                     <?php endif; ?>
                 </div>
             </div>
 
-            <!-- My Courses -->
-            <div class="col-lg-8">
+            <!-- Recent Grades -->
+            <div class="col-lg-6">
                 <div class="section-card">
                     <div class="section-header">
-                        <h6><i class="bi bi-book" style="color:var(--purple)"></i> My Enrolled Courses</h6>
-                        <a href="courses.php">View All <i class="bi bi-arrow-right"></i></a>
+                        <h6><i class="bi bi-star" style="color:var(--purple)"></i> Recent Grades</h6>
                     </div>
-                    <div class="p-3">
-                        <?php if (mysqli_num_rows($my_courses) > 0): ?>
-                            <div class="row g-3">
-                                <?php while ($course = mysqli_fetch_assoc($my_courses)): ?>
-                                    <div class="col-md-6">
-                                        <div class="course-card">
-                                            <div class="course-code"><?= htmlspecialchars($course['course_code']) ?></div>
-                                            <div class="course-name"><?= htmlspecialchars($course['course_name']) ?></div>
-                                            <div class="course-lecturer">
-                                                <i class="bi bi-person me-1"></i>
-                                                <?= htmlspecialchars($course['lecturer_name']) ?>
-                                            </div>
-                                            <div class="course-meta">
-                                                <span><i class="bi bi-file-earmark-text"></i><?= $course['notes_count'] ?> Notes</span>
-                                                <span><i class="bi bi-clipboard2"></i><?= $course['assignments_count'] ?> Tasks</span>
-                                            </div>
-                                            <div class="progress-thin">
-                                                <div class="progress-fill" style="width:<?= min(($course['notes_count'] * 10), 100) ?>%"></div>
-                                            </div>
-                                        </div>
+                    <?php if (mysqli_num_rows($recent_grades) > 0): ?>
+                        <?php while ($g = mysqli_fetch_assoc($recent_grades)): ?>
+                            <?php $pct = round(($g['marks_obtained'] / $g['total_marks']) * 100, 1); ?>
+                            <div class="item-row">
+                                <div class="item-icon" style="background:rgba(180,143,252,0.15);color:var(--purple)">
+                                    <i class="bi bi-star-fill"></i>
+                                </div>
+                                <div class="item-info">
+                                    <div class="item-title"><?= htmlspecialchars($g['assignment_title']) ?></div>
+                                    <div class="item-sub">
+                                        <span class="badge-glass badge-blue"><?= htmlspecialchars($g['course_code']) ?></span>
+                                        <span>Score: <?= $g['marks_obtained'] ?>/<?= $g['total_marks'] ?></span>
                                     </div>
-                                <?php endwhile; ?>
+                                </div>
+                                <span class="badge-glass <?= $pct >= 70 ? 'badge-green' : ($pct >= 50 ? 'badge-yellow' : 'badge-red') ?>">
+                                    <?= $pct ?>%
+                                </span>
                             </div>
-                        <?php else: ?>
-                            <div class="empty-state">
-                                <i class="bi bi-book d-block"></i>
-                                <p>You are not enrolled in any courses yet.</p>
-                            </div>
-                        <?php endif; ?>
-                    </div>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <div class="empty-state">
+                            <i class="bi bi-star"></i>
+                            <p>No graded assignments yet.</p>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
+    </div>
+</div>
 
-    </div><!-- end page-body -->
-</div><!-- end main-content -->
-
-<!-- Sidebar overlay for mobile -->
+<!-- Sidebar Overlay -->
 <div id="overlay" onclick="closeSidebar()"
      style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:99;"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // ── Mobile sidebar toggle ─────────────────────────────
-    const sidebar   = document.getElementById('sidebar');
-    const overlay   = document.getElementById('overlay');
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('overlay');
     const hamburger = document.getElementById('hamburger');
 
     hamburger.addEventListener('click', () => {

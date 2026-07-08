@@ -77,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $title       = trim($_POST['title']        ?? '');
         $description = trim($_POST['description']  ?? '');
         $due_date    = trim($_POST['due_date']      ?? '');
-        $max_marks   = (int)($_POST['max_marks']   ?? 100);
+        $total_marks = (int)($_POST['total_marks'] ?? 100);
 
         if ($course_id <= 0 || $title === '') {
             $_SESSION['flash_error'] = 'Course and title are required.';
@@ -88,8 +88,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $due_date_val = $due_date !== '' ? $due_date : null;
 
         $stmt = mysqli_prepare($conn,
-            "INSERT INTO assignments (course_id, title, description, due_date, max_marks, status, created_at)
-             VALUES (?, ?, ?, ?, ?, 'active', NOW())"
+            "INSERT INTO assignments (course_id, title, description, due_date, total_marks, created_by, status, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'active', NOW())"
         );
 
         if ($stmt === false) {
@@ -98,8 +98,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        mysqli_stmt_bind_param($stmt, "isssi",
-            $course_id, $title, $description, $due_date_val, $max_marks
+        mysqli_stmt_bind_param($stmt, "isssii",
+            $course_id, $title, $description, $due_date_val, $total_marks, $admin_id
         );
 
         if (mysqli_stmt_execute($stmt)) {
@@ -118,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $title       = trim($_POST['title']          ?? '');
         $description = trim($_POST['description']    ?? '');
         $due_date    = trim($_POST['due_date']        ?? '');
-        $max_marks   = (int)($_POST['max_marks']     ?? 100);
+        $total_marks = (int)($_POST['total_marks']   ?? 100);
 
         if ($assign_id <= 0 || $course_id <= 0 || $title === '') {
             $_SESSION['flash_error'] = 'Course and title are required.';
@@ -129,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $due_date_val = $due_date !== '' ? $due_date : null;
 
         $stmt = mysqli_prepare($conn,
-            "UPDATE assignments SET course_id=?, title=?, description=?, due_date=?, max_marks=?, updated_at=NOW()
+            "UPDATE assignments SET course_id=?, title=?, description=?, due_date=?, total_marks=?, updated_at=NOW()
              WHERE id=?"
         );
 
@@ -140,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         mysqli_stmt_bind_param($stmt, "isssii",
-            $course_id, $title, $description, $due_date_val, $max_marks, $assign_id
+            $course_id, $title, $description, $due_date_val, $total_marks, $assign_id
         );
 
         if (mysqli_stmt_execute($stmt)) {
@@ -950,7 +950,7 @@ $current_qs = buildQS();
                             <div class="assign-sub">
                                 <span><i class="bi bi-book"></i><?= htmlspecialchars($a['course_code']) ?></span>
                                 <span><i class="bi bi-person"></i><?= htmlspecialchars($a['lecturer_name']) ?></span>
-                                <span><i class="bi bi-trophy"></i><?= (int)$a['max_marks'] ?> marks</span>
+                                <span><i class="bi bi-trophy"></i><?= (int)$a['total_marks'] ?> marks</span>
                                 <span><i class="bi bi-inbox"></i><?= (int)$a['submission_count'] ?> submission<?= $a['submission_count'] == 1 ? '' : 's' ?></span>
                             </div>
                         </div>
@@ -971,7 +971,7 @@ $current_qs = buildQS();
                                         "title"       => $a['title'],
                                         "description" => $a['description'] ?? '',
                                         "due_date"    => $a['due_date'] ?? '',
-                                        "max_marks"   => $a['max_marks'] ?? 100,
+                                        "total_marks"   => $a['total_marks'] ?? 100,
                                     ]) ?>)'>
                                 <i class="bi bi-pencil"></i>
                             </button>
@@ -1078,7 +1078,7 @@ $current_qs = buildQS();
                         </div>
                         <div class="col-md-5">
                             <label class="form-label">Max Marks</label>
-                            <input type="number" name="max_marks" class="form-control form-control-dark"
+                            <input type="number" name="total_marks" class="form-control form-control-dark"
                                    value="100" min="1" max="1000" required>
                         </div>
                     </div>
@@ -1138,7 +1138,7 @@ $current_qs = buildQS();
                         </div>
                         <div class="col-md-5">
                             <label class="form-label">Max Marks</label>
-                            <input type="number" name="max_marks" id="edit_max_marks"
+                            <input type="number" name="total_marks" id="edit_total_marks"
                                    class="form-control form-control-dark"
                                    min="1" max="1000" required>
                         </div>
@@ -1178,7 +1178,7 @@ $current_qs = buildQS();
         document.getElementById('edit_course_id').value   = a.course_id;
         document.getElementById('edit_title').value       = a.title;
         document.getElementById('edit_description').value = a.description;
-        document.getElementById('edit_max_marks').value   = a.max_marks;
+        document.getElementById('edit_total_marks').value   = a.total_marks;
 
         // Format due_date for datetime-local input (YYYY-MM-DDTHH:MM)
         if (a.due_date && a.due_date !== '') {

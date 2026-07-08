@@ -9,77 +9,88 @@ $lecturer_id   = $_SESSION['user_id'];
 $lecturer_name = $_SESSION['user_name'];
 
 // ── Fetch lecturer info ──────────────────────────────────
-$lecturer = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT * FROM users WHERE id = '$lecturer_id'")
-);
+$stmt = mysqli_prepare($conn, "SELECT * FROM users WHERE id = ?");
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$lecturer = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
 
 // ── Count my courses ─────────────────────────────────────
-$courses_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM courses
-                          WHERE lecturer_id = '$lecturer_id' AND status = 'active'")
-)['total'];
+$stmt = mysqli_prepare($conn, "SELECT COUNT(*) as total FROM courses WHERE lecturer_id = ? AND status = 'active'");
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$courses_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count my notes ───────────────────────────────────────
-$notes_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM notes
-                          WHERE uploaded_by = '$lecturer_id' AND status = 'active'")
-)['total'];
+$stmt = mysqli_prepare($conn, "SELECT COUNT(*) as total FROM notes WHERE uploaded_by = ? AND status = 'active'");
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$notes_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count my assignments ─────────────────────────────────
-$assignments_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM assignments
-                          WHERE created_by = '$lecturer_id' AND status = 'active'")
-)['total'];
+$stmt = mysqli_prepare($conn, "SELECT COUNT(*) as total FROM assignments WHERE created_by = ? AND status = 'active'");
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$assignments_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count total submissions across my assignments ────────
-$submissions_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM submissions s
-                          INNER JOIN assignments a ON s.assignment_id = a.id
-                          WHERE a.created_by = '$lecturer_id'")
-)['total'];
+$stmt = mysqli_prepare($conn,
+    "SELECT COUNT(*) as total FROM submissions s
+     INNER JOIN assignments a ON s.assignment_id = a.id
+     WHERE a.created_by = ?"
+);
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$submissions_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count pending grading (submitted but not graded) ─────
-$pending_grading = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM submissions s
-                          INNER JOIN assignments a ON s.assignment_id = a.id
-                          LEFT JOIN grades g ON s.id = g.submission_id
-                          WHERE a.created_by = '$lecturer_id'
-                          AND g.id IS NULL")
-)['total'];
+$stmt = mysqli_prepare($conn,
+    "SELECT COUNT(*) as total FROM submissions s
+     INNER JOIN assignments a ON s.assignment_id = a.id
+     LEFT JOIN grades g ON s.id = g.submission_id
+     WHERE a.created_by = ? AND g.id IS NULL"
+);
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$pending_grading = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count total enrolled students in my courses ──────────
-$students_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(DISTINCT ce.student_id) as total
-                          FROM course_enrollments ce
-                          INNER JOIN courses c ON ce.course_id = c.id
-                          WHERE c.lecturer_id = '$lecturer_id'
-                          AND ce.status = 'enrolled'")
-)['total'];
+$stmt = mysqli_prepare($conn,
+    "SELECT COUNT(DISTINCT ce.student_id) as total
+     FROM course_enrollments ce
+     INNER JOIN courses c ON ce.course_id = c.id
+     WHERE c.lecturer_id = ? AND ce.status = 'enrolled'"
+);
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$students_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── Count unread notifications ───────────────────────────
-$notifications_count = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM notifications n
-                          LEFT JOIN notification_reads nr ON n.id = nr.notification_id
-                              AND nr.user_id = '$lecturer_id'
-                          WHERE (n.target_role = 'lecturer' OR n.target_role = 'all')
-                          AND nr.id IS NULL")
-)['total'];
+$stmt = mysqli_prepare($conn,
+    "SELECT COUNT(*) as total FROM notifications n
+     LEFT JOIN notification_reads nr ON n.id = nr.notification_id AND nr.user_id = ?
+     WHERE (n.target_role = 'lecturer' OR n.target_role = 'all') AND nr.id IS NULL"
+);
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$notifications_count = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'];
 
 // ── My courses with stats ────────────────────────────────
-$my_courses = mysqli_query($conn,
+$stmt = mysqli_prepare($conn,
     "SELECT c.*,
             (SELECT COUNT(*) FROM course_enrollments WHERE course_id = c.id AND status = 'enrolled') AS students,
             (SELECT COUNT(*) FROM notes WHERE course_id = c.id AND status = 'active') AS notes_count,
             (SELECT COUNT(*) FROM assignments WHERE course_id = c.id AND status = 'active') AS assign_count
      FROM courses c
-     WHERE c.lecturer_id = '$lecturer_id'
-     AND c.status = 'active'
+     WHERE c.lecturer_id = ? AND c.status = 'active'
      ORDER BY c.created_at DESC
      LIMIT 6"
 );
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$my_courses = mysqli_stmt_get_result($stmt);
 
 // ── Recent submissions to grade ──────────────────────────
-$recent_submissions = mysqli_query($conn,
+$stmt = mysqli_prepare($conn,
     "SELECT s.*, u.name AS student_name,
             a.title AS assignment_title,
             a.total_marks,
@@ -91,48 +102,60 @@ $recent_submissions = mysqli_query($conn,
      INNER JOIN assignments a ON s.assignment_id = a.id
      INNER JOIN courses c ON a.course_id = c.id
      LEFT JOIN grades g ON s.id = g.submission_id
-     WHERE a.created_by = '$lecturer_id'
+     WHERE a.created_by = ?
      ORDER BY s.submitted_at DESC
      LIMIT 6"
 );
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$recent_submissions = mysqli_stmt_get_result($stmt);
 
 // ── Recent notes I uploaded ──────────────────────────────
-$recent_notes = mysqli_query($conn,
+$stmt = mysqli_prepare($conn,
     "SELECT n.*, c.course_name, c.course_code
      FROM notes n
      INNER JOIN courses c ON n.course_id = c.id
-     WHERE n.uploaded_by = '$lecturer_id'
+     WHERE n.uploaded_by = ?
      AND n.status = 'active'
      ORDER BY n.created_at DESC
      LIMIT 5"
 );
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$recent_notes = mysqli_stmt_get_result($stmt);
 
 // ── Upcoming assignment deadlines ────────────────────────
-$upcoming_assignments = mysqli_query($conn,
+$stmt = mysqli_prepare($conn,
     "SELECT a.*, c.course_name, c.course_code,
             (SELECT COUNT(*) FROM submissions WHERE assignment_id = a.id) AS submission_count,
             TIMESTAMPDIFF(HOUR, NOW(), a.due_date) AS hours_left
      FROM assignments a
      INNER JOIN courses c ON a.course_id = c.id
-     WHERE a.created_by = '$lecturer_id'
+     WHERE a.created_by = ?
      AND a.status = 'active'
      AND a.due_date >= NOW()
      ORDER BY a.due_date ASC
      LIMIT 5"
 );
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$upcoming_assignments = mysqli_stmt_get_result($stmt);
 
 // ── Recent notifications ─────────────────────────────────
-$recent_notifications = mysqli_query($conn,
+$stmt = mysqli_prepare($conn,
     "SELECT n.*, u.name AS sender_name,
             nr.id AS is_read
      FROM notifications n
      INNER JOIN users u ON n.sent_by = u.id
      LEFT JOIN notification_reads nr ON n.id = nr.notification_id
-         AND nr.user_id = '$lecturer_id'
+         AND nr.user_id = ?
      WHERE (n.target_role = 'lecturer' OR n.target_role = 'all')
      ORDER BY n.created_at DESC
      LIMIT 5"
 );
+mysqli_stmt_bind_param($stmt, "i", $lecturer_id);
+mysqli_stmt_execute($stmt);
+$recent_notifications = mysqli_stmt_get_result($stmt);
 ?>
 <!DOCTYPE html>
 <html lang="en">

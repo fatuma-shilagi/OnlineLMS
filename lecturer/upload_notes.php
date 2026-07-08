@@ -70,10 +70,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_note'])) {
                 if (move_uploaded_file($tmp_path, $upload_dir . $stored_name)) {
                     $insert_stmt = mysqli_prepare($conn,
                         "INSERT INTO notes
-                            (course_id, uploaded_by, title, description, file_name, original_filename, file_size, file_type, status, created_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW())");
-                    mysqli_stmt_bind_param($insert_stmt, "iissssis",
-                        $course_id, $lecturer_id, $title, $description, $stored_name, $orig_name, $file_size, $ext);
+                            (course_id, uploaded_by, title, description, file_name, file_size, file_type, status, created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', NOW())");
+                    mysqli_stmt_bind_param($insert_stmt, "iisssis",
+                        $course_id, $lecturer_id, $title, $description, $stored_name, $file_size, $ext);
 
                     if (mysqli_stmt_execute($insert_stmt)) {
                         $success_msg = 'Note uploaded successfully to ' . htmlspecialchars($course_row['course_code']) . '.';

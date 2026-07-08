@@ -16,16 +16,18 @@ $student       = mysqli_fetch_assoc($student_query);
 $search        = isset($_GET['search']) ? trim($_GET['search']) : '';
 $search_safe   = mysqli_real_escape_string($conn, $search);
 $search_clause = '';
+$search_param = '';
 if ($search !== '') {
-    $search_clause = "AND (a.title LIKE '%$search_safe%'
-                       OR c.course_name LIKE '%$search_safe%'
-                       OR c.course_code LIKE '%$search_safe%')";
+    $search_param = "%$search%";
+    $search_clause = "AND (a.title LIKE ?
+                       OR c.course_name LIKE ?
+                       OR c.course_code LIKE ?)";
 }
 
 $filter_course_id = isset($_GET['course_id']) ? (int) $_GET['course_id'] : 0;
 $course_clause     = '';
 if ($filter_course_id > 0) {
-    $course_clause = "AND a.course_id = '$filter_course_id'";
+    $course_clause = "AND a.course_id = ?";
 }
 
 $status_filter = isset($_GET['status']) ? $_GET['status'] : 'all';
@@ -116,25 +118,40 @@ if ($filter_course_id > 0) {
 }
 
 // ── Assignments list (course/search filtered, status computed in PHP) ──
-// NOTE: assumes `grades` has an `assignment_id` column linking back to the
-// assignment. Adjust the JOIN below if your schema stores grades differently.
-$assignments_raw = mysqli_query($conn,
-    "SELECT a.*, c.course_name, c.course_code,
+$sql = "SELECT a.*, c.course_name, c.course_code,
             s.id AS submission_id, s.created_at AS submission_date,
             g.marks_obtained, g.total_marks AS grade_total_marks, g.feedback,
             TIMESTAMPDIFF(HOUR, NOW(), a.due_date) AS hours_left
      FROM assignments a
      INNER JOIN courses c ON a.course_id = c.id
      INNER JOIN course_enrollments ce ON a.course_id = ce.course_id
-     LEFT JOIN submissions s ON a.id = s.assignment_id AND s.student_id = '$student_id'
-     LEFT JOIN grades g ON a.id = g.assignment_id AND g.student_id = '$student_id'
-     WHERE ce.student_id = '$student_id'
+     LEFT JOIN submissions s ON a.id = s.assignment_id AND s.student_id = ?
+     LEFT JOIN grades g ON a.id = g.assignment_id AND g.student_id = ?
+     WHERE ce.student_id = ?
      AND ce.status = 'enrolled'
      AND a.status = 'active'
      $course_clause
      $search_clause
-     ORDER BY a.due_date ASC"
-);
+     ORDER BY a.due_date ASC";
+
+$stmt = mysqli_prepare($conn, $sql);
+$param_types = "iii";
+$param_values = [$student_id, $student_id, $student_id];
+
+if ($filter_course_id > 0) {
+    $param_types .= "i";
+    $param_values[] = $filter_course_id;
+}
+if ($search !== '') {
+    $param_types .= "sss";
+    $param_values[] = $search_param;
+    $param_values[] = $search_param;
+    $param_values[] = $search_param;
+}
+
+mysqli_stmt_bind_param($stmt, $param_types, ...$param_values);
+mysqli_stmt_execute($stmt);
+$assignments_raw = mysqli_stmt_get_result($stmt);
 
 $assignments = [];
 while ($row = mysqli_fetch_assoc($assignments_raw)) {

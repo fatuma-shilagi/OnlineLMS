@@ -154,25 +154,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $stmt = mysqli_prepare($conn,
-            "INSERT INTO notes (course_id, title, description, file_name, file_path, file_size, file_type, downloads, status, created_at)
+            "INSERT INTO notes (course_id, title, description, file_name, file_path, file_size, file_type, download_count, status, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', NOW())"
         );
-        $stmt = mysqli_prepare($conn,
-        "INSERT INTO notes (course_id, title, description, file_name, file_path, file_size, file_type, downloads, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', NOW())"
-    );
-    
-    if ($stmt === false) {
-        $_SESSION['flash_error'] = 'Prepare failed: ' . mysqli_error($conn);
-        header('Location: manage_notes.php');
-        exit;
-    }
-    
-    // i=int, s=string — order must match columns above:
-    // course_id(i), title(s), description(s), file_name(s), file_path(s), file_size(i), file_type(s)
-    mysqli_stmt_bind_param($stmt, "issssiss",
-        $course_id, $title, $description, $file_name_db, $file_path_db, $file_size_db, $file_type_db
-    );
+
+        if ($stmt === false) {
+            $_SESSION['flash_error'] = 'Prepare failed: ' . mysqli_error($conn);
+            header('Location: manage_notes.php');
+            exit;
+        }
+
+        mysqli_stmt_bind_param($stmt, "issssis",
+            $course_id, $title, $description, $file_name_db, $file_path_db, $file_size_db, $file_type_db
+        );
 
         if (mysqli_stmt_execute($stmt)) {
             $_SESSION['flash_success'] = 'Note uploaded successfully.';
@@ -328,7 +322,7 @@ while ($row = mysqli_fetch_assoc($notes_result)) {
 // ── Stat cards ────────────────────────────────────────────
 $total_notes_active   = safe_query_total($conn, "SELECT COUNT(*) as total FROM notes WHERE status = 'active'");
 $total_notes_inactive = safe_query_total($conn, "SELECT COUNT(*) as total FROM notes WHERE status = 'inactive'");
-$total_downloads      = safe_query_total($conn, "SELECT COALESCE(SUM(downloads), 0) as total FROM notes");
+$total_downloads      = safe_query_total($conn, "SELECT COALESCE(SUM(download_count), 0) as total FROM notes");
 $courses_with_notes   = safe_query_total($conn, "SELECT COUNT(DISTINCT course_id) as total FROM notes");
 
 // ── Courses for filters / add-note dropdown ───────────────
@@ -1013,7 +1007,7 @@ $current_qs = buildQS();
 
                         <div class="note-meta">
                             <span class="badge-glass <?= $status_badge ?>"><?= ucfirst($note['status']) ?></span>
-                            <span><i class="bi bi-download"></i> <?= (int)($note['downloads'] ?? 0) ?></span>
+                            <span><i class="bi bi-download"></i> <?= (int)($note['download_count'] ?? 0) ?></span>
                             <span><?= date('d M Y', strtotime($note['created_at'])) ?></span>
                         </div>
 

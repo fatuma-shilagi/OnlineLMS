@@ -8,150 +8,299 @@ requireRole('admin');
 $admin_id   = $_SESSION['user_id'];
 $admin_name = $_SESSION['user_name'];
 
-$success = '';
-$error   = '';
+// ── CSRF token ───────────────────────────────────────────
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf_token = $_SESSION['csrf_token'];
 
-// ── Handle Add Course ────────────────────────────────────
-if (isset($_POST['add_course'])) {
-    $course_code = trim(mysqli_real_escape_string($conn, $_POST['course_code']));
-    $course_name = trim(mysqli_real_escape_string($conn, $_POST['course_name']));
-    $description = trim(mysqli_real_escape_string($conn, $_POST['description']));
-    $lecturer_id = intval($_POST['lecturer_id']);
-
-    if (empty($course_code) || empty($course_name) || empty($lecturer_id)) {
-        $error = "Course code, name and lecturer are required.";
-    } else {
-        // Check duplicate course code
-        $check = mysqli_query($conn, "SELECT id FROM courses WHERE course_code = '$course_code'");
-        if (mysqli_num_rows($check) > 0) {
-            $error = "Course code '$course_code' already exists.";
-        } else {
-            $sql = "INSERT INTO courses (course_code, course_name, description, lecturer_id, status)
-                    VALUES ('$course_code', '$course_name', '$description', '$lecturer_id', 'active')";
-            if (mysqli_query($conn, $sql)) {
-                $new_id = mysqli_insert_id($conn);
-                // Log activity
-                $ip = $_SERVER['REMOTE_ADDR'];
-                mysqli_query($conn, "INSERT INTO activity_logs (user_id, action, module, details, ip_address)
-                                     VALUES ('$admin_id', 'Added course', 'Courses', 'Added: $course_name', '$ip')");
-                $success = "Course '$course_name' added successfully!";
-            } else {
-                $error = "Failed to add course. Please try again.";
-            }
-        }
-    }
+function verifyCsrf($token) {
+    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], (string)$token);
 }
 
-// ── Handle Edit Course ───────────────────────────────────
-if (isset($_POST['edit_course'])) {
-    $id          = intval($_POST['course_id']);
-    $course_code = trim(mysqli_real_escape_string($conn, $_POST['course_code']));
-    $course_name = trim(mysqli_real_escape_string($conn, $_POST['course_name']));
-    $description = trim(mysqli_real_escape_string($conn, $_POST['description']));
-    $lecturer_id = intval($_POST['lecturer_id']);
-    $status      = $_POST['status'] === 'active' ? 'active' : 'inactive';
+// ── Flash messages (PRG pattern) ────────────────────────
+$flash_success = $_SESSION['flash_success'] ?? null;
+$flash_error   = $_SESSION['flash_error']   ?? null;
+unset($_SESSION['flash_success'], $_SESSION['flash_error']);
 
-    if (empty($course_code) || empty($course_name) || empty($lecturer_id)) {
-        $error = "Course code, name and lecturer are required.";
-    } else {
-        // Check duplicate code excluding this course
-        $check = mysqli_query($conn, "SELECT id FROM courses
-                                       WHERE course_code = '$course_code' AND id != '$id'");
-        if (mysqli_num_rows($check) > 0) {
-            $error = "Course code '$course_code' already used by another course.";
-        } else {
-            $sql = "UPDATE courses SET
-                        course_code  = '$course_code',
-                        course_name  = '$course_name',
-                        description  = '$description',
-                        lecturer_id  = '$lecturer_id',
-                        status       = '$status'
-                    WHERE id = '$id'";
-            if (mysqli_query($conn, $sql)) {
-                $ip = $_SERVER['REMOTE_ADDR'];
-                mysqli_query($conn, "INSERT INTO activity_logs (user_id, action, module, details, ip_address)
-                                     VALUES ('$admin_id', 'Edited course', 'Courses', 'Edited: $course_name', '$ip')");
-                $success = "Course updated successfully!";
-            } else {
-                $error = "Failed to update course.";
-            }
-        }
+// ── Handle Add Course (POST) ─────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_course') {
+
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $_SESSION['flash_error'] = 'Session expired. Please try again.';
+        header('Location: manage_courses.php');
+        exit;
     }
+
+    $course_code = strtoupper(trim($_POST['course_code'] ?? ''));
+    $course_name = trim($_POST['course_name'] ?? '');
+    $description = trim($_POST['description'] ?? '');
+    $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
+
+    if ($course_code === '' || $course_name === '' || $lecturer_id <= 0) {
+        $_SESSION['flash_error'] = 'Course code, name and lecturer are required.';
+        header('Location: manage_courses.php');
+        exit;
+    }
+
+    // Check duplicate course code
+    $stmt = mysqli_prepare($conn, "SELECT id FROM courses WHERE course_code = ?");
+    mysqli_stmt_bind_param($stmt, "s", $course_code);
+    mysqli_stmt_execute($stmt);
+    $dup_result = mysqli_stmt_get_result($stmt);
+
+    if (mysqli_num_rows($dup_result) > 0) {
+        $_SESSION['flash_error'] = "Course code '$course_code' already exists.";
+        header('Location: manage_courses.php');
+        exit;
+    }
+
+    // Insert course
+    $stmt = mysqli_prepare($conn,
+        "INSERT INTO courses (course_code, course_name, description, lecturer_id, status, created_at)
+         VALUES (?, ?, ?, ?, 'active', NOW())"
+    );
+    mysqli_stmt_bind_param($stmt, "sssi", $course_code, $course_name, $description, $lecturer_id);
+
+    if (mysqli_stmt_execute($stmt)) {
+        // Log activity
+        $ip = $_SERVER['REMOTE_ADDR'];
+        $log_stmt = mysqli_prepare($conn,
+            "INSERT INTO activity_logs (user_id, action, module, details, ip_address, created_at)
+             VALUES (?, 'Added course', 'Courses', ?, ?, NOW())"
+        );
+        $details = "Added: $course_name";
+        mysqli_stmt_bind_param($log_stmt, "iss", $admin_id, $details, $ip);
+        mysqli_stmt_execute($log_stmt);
+
+        $_SESSION['flash_success'] = "Course '$course_name' added successfully.";
+    } else {
+        $_SESSION['flash_error'] = 'Failed to add course. Please try again.';
+    }
+    header('Location: manage_courses.php');
+    exit;
 }
 
-// ── Handle Delete Course ─────────────────────────────────
-if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
-    $del_id = intval($_GET['delete']);
-    $cname  = mysqli_fetch_assoc(
-        mysqli_query($conn, "SELECT course_name FROM courses WHERE id = '$del_id'")
-    )['course_name'] ?? '';
+// ── Handle Edit Course (POST) ────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'edit_course') {
 
-    // Delete enrollments, notes, assignments first
-    mysqli_query($conn, "DELETE FROM course_enrollments WHERE course_id = '$del_id'");
-    mysqli_query($conn, "DELETE FROM notes WHERE course_id = '$del_id'");
-    mysqli_query($conn, "DELETE FROM assignments WHERE course_id = '$del_id'");
-    mysqli_query($conn, "DELETE FROM courses WHERE id = '$del_id'");
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $_SESSION['flash_error'] = 'Session expired. Please try again.';
+        header('Location: manage_courses.php');
+        exit;
+    }
 
+    $id          = (int)($_POST['course_id'] ?? 0);
+    $course_code = strtoupper(trim($_POST['course_code'] ?? ''));
+    $course_name = trim($_POST['course_name'] ?? '');
+    $description = trim($_POST['description'] ?? '');
+    $lecturer_id = (int)($_POST['lecturer_id'] ?? 0);
+    $status      = ($_POST['status'] ?? 'active') === 'active' ? 'active' : 'inactive';
+
+    if ($id <= 0 || $course_code === '' || $course_name === '' || $lecturer_id <= 0) {
+        $_SESSION['flash_error'] = 'All fields are required.';
+        header('Location: manage_courses.php');
+        exit;
+    }
+
+    // Check duplicate code excluding this course
+    $stmt = mysqli_prepare($conn, "SELECT id FROM courses WHERE course_code = ? AND id != ?");
+    mysqli_stmt_bind_param($stmt, "si", $course_code, $id);
+    mysqli_stmt_execute($stmt);
+    $dup_result = mysqli_stmt_get_result($stmt);
+
+    if (mysqli_num_rows($dup_result) > 0) {
+        $_SESSION['flash_error'] = "Course code '$course_code' already used by another course.";
+        header('Location: manage_courses.php');
+        exit;
+    }
+
+    // Update course
+    $stmt = mysqli_prepare($conn,
+        "UPDATE courses SET course_code = ?, course_name = ?, description = ?, lecturer_id = ?, status = ?, updated_at = NOW()
+         WHERE id = ?"
+    );
+    mysqli_stmt_bind_param($stmt, "sssisi", $course_code, $course_name, $description, $lecturer_id, $status, $id);
+
+    if (mysqli_stmt_execute($stmt)) {
+        $ip = $_SERVER['REMOTE_ADDR'];
+        $log_stmt = mysqli_prepare($conn,
+            "INSERT INTO activity_logs (user_id, action, module, details, ip_address, created_at)
+             VALUES (?, 'Edited course', 'Courses', ?, ?, NOW())"
+        );
+        $details = "Edited: $course_name";
+        mysqli_stmt_bind_param($log_stmt, "iss", $admin_id, $details, $ip);
+        mysqli_stmt_execute($log_stmt);
+
+        $_SESSION['flash_success'] = 'Course updated successfully.';
+    } else {
+        $_SESSION['flash_error'] = 'Failed to update course.';
+    }
+    header('Location: manage_courses.php' . (isset($_POST['redirect_qs']) ? '?' . $_POST['redirect_qs'] : ''));
+    exit;
+}
+
+// ── Handle Delete Course (POST only) ─────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_course') {
+
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $_SESSION['flash_error'] = 'Session expired. Please try again.';
+        header('Location: manage_courses.php');
+        exit;
+    }
+
+    $del_id = (int)($_POST['course_id'] ?? 0);
+
+    // Get course name before deletion
+    $stmt = mysqli_prepare($conn, "SELECT course_name FROM courses WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $del_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+    $cname = $row['course_name'] ?? '';
+
+    // Delete related records
+    $stmt1 = mysqli_prepare($conn, "DELETE FROM course_enrollments WHERE course_id = ?");
+    mysqli_stmt_bind_param($stmt1, "i", $del_id);
+    mysqli_stmt_execute($stmt1);
+
+    $stmt2 = mysqli_prepare($conn, "DELETE FROM notes WHERE course_id = ?");
+    mysqli_stmt_bind_param($stmt2, "i", $del_id);
+    mysqli_stmt_execute($stmt2);
+
+    $stmt3 = mysqli_prepare($conn, "DELETE FROM assignments WHERE course_id = ?");
+    mysqli_stmt_bind_param($stmt3, "i", $del_id);
+    mysqli_stmt_execute($stmt3);
+
+    $stmt4 = mysqli_prepare($conn, "DELETE FROM courses WHERE id = ?");
+    mysqli_stmt_bind_param($stmt4, "i", $del_id);
+    mysqli_stmt_execute($stmt4);
+
+    // Log activity
     $ip = $_SERVER['REMOTE_ADDR'];
-    mysqli_query($conn, "INSERT INTO activity_logs (user_id, action, module, details, ip_address)
-                         VALUES ('$admin_id', 'Deleted course', 'Courses', 'Deleted: $cname', '$ip')");
-    $success = "Course deleted successfully.";
+    $log_stmt = mysqli_prepare($conn,
+        "INSERT INTO activity_logs (user_id, action, module, details, ip_address, created_at)
+         VALUES (?, 'Deleted course', 'Courses', ?, ?, NOW())"
+    );
+    $details = "Deleted: $cname";
+    mysqli_stmt_bind_param($log_stmt, "iss", $admin_id, $details, $ip);
+    mysqli_stmt_execute($log_stmt);
+
+    $_SESSION['flash_success'] = 'Course deleted successfully.';
+    header('Location: manage_courses.php' . (isset($_POST['redirect_qs']) ? '?' . $_POST['redirect_qs'] : ''));
+    exit;
 }
 
-// ── Handle Toggle Status ─────────────────────────────────
-if (isset($_GET['toggle']) && is_numeric($_GET['toggle'])) {
-    $tog_id = intval($_GET['toggle']);
-    $cur    = mysqli_fetch_assoc(
-        mysqli_query($conn, "SELECT status FROM courses WHERE id = '$tog_id'")
-    )['status'];
-    $new_status = ($cur === 'active') ? 'inactive' : 'active';
-    mysqli_query($conn, "UPDATE courses SET status = '$new_status' WHERE id = '$tog_id'");
-    $success = "Course status changed to $new_status.";
+// ── Handle Toggle Status (POST only) ────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'toggle_status') {
+
+    if (!verifyCsrf($_POST['csrf_token'] ?? '')) {
+        $_SESSION['flash_error'] = 'Session expired. Please try again.';
+        header('Location: manage_courses.php');
+        exit;
+    }
+
+    $tog_id = (int)($_POST['course_id'] ?? 0);
+
+    $stmt = mysqli_prepare($conn, "SELECT status FROM courses WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $tog_id);
+    mysqli_stmt_execute($stmt);
+    $row = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+
+    if ($row) {
+        $new_status = ($row['status'] === 'active') ? 'inactive' : 'active';
+        $stmt2 = mysqli_prepare($conn, "UPDATE courses SET status = ?, updated_at = NOW() WHERE id = ?");
+        mysqli_stmt_bind_param($stmt2, "si", $new_status, $tog_id);
+        mysqli_stmt_execute($stmt2);
+        $_SESSION['flash_success'] = "Course status changed to $new_status.";
+    }
+    header('Location: manage_courses.php' . (isset($_POST['redirect_qs']) ? '?' . $_POST['redirect_qs'] : ''));
+    exit;
 }
 
-// ── Search & Filter ──────────────────────────────────────
-$search     = isset($_GET['search']) ? trim(mysqli_real_escape_string($conn, $_GET['search'])) : '';
-$filter_status = isset($_GET['status']) ? $_GET['status'] : '';
-$page       = isset($_GET['page']) && is_numeric($_GET['page']) ? intval($_GET['page']) : 1;
-$per_page   = 8;
-$offset     = ($page - 1) * $per_page;
+// ── Search & Filter (GET - safe with prepared stmts) ─────
+$search        = trim($_GET['search'] ?? '');
+$filter_status = $_GET['status'] ?? '';
+$page          = max(1, (int)($_GET['page'] ?? 1));
+$per_page      = 8;
+$offset        = ($page - 1) * $per_page;
 
-$where = "WHERE 1=1";
-if ($search)       $where .= " AND (c.course_name LIKE '%$search%' OR c.course_code LIKE '%$search%' OR u.name LIKE '%$search%')";
-if ($filter_status) $where .= " AND c.status = '$filter_status'";
+$where  = ["1=1"];
+$types  = "";
+$params = [];
 
-$total_rows = mysqli_fetch_assoc(
-    mysqli_query($conn, "SELECT COUNT(*) as total FROM courses c
-                          INNER JOIN users u ON c.lecturer_id = u.id $where")
-)['total'];
+if ($search !== '') {
+    $where[] = "(c.course_name LIKE ? OR c.course_code LIKE ? OR u.name LIKE ?)";
+    $like = "%$search%";
+    $types .= "sss";
+    $params[] = $like; $params[] = $like; $params[] = $like;
+}
+if ($filter_status === 'active' || $filter_status === 'inactive') {
+    $where[] = "c.status = ?";
+    $types .= "s";
+    $params[] = $filter_status;
+}
+$where_sql = implode(' AND ', $where);
 
-$total_pages = ceil($total_rows / $per_page);
+// ── Count for pagination ──────────────────────────────────
+$count_sql = "SELECT COUNT(*) as total FROM courses c INNER JOIN users u ON c.lecturer_id = u.id WHERE $where_sql";
+$stmt = mysqli_prepare($conn, $count_sql);
+if ($types !== '') mysqli_stmt_bind_param($stmt, $types, ...$params);
+mysqli_stmt_execute($stmt);
+$total_rows  = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt))['total'] ?? 0;
+$total_pages = max(1, ceil($total_rows / $per_page));
 
-$courses = mysqli_query($conn,
-    "SELECT c.*, u.name AS lecturer_name,
+// ── Fetch courses ────────────────────────────────────────
+$list_sql = "SELECT c.*, u.name AS lecturer_name,
             (SELECT COUNT(*) FROM course_enrollments WHERE course_id = c.id AND status = 'enrolled') AS students,
             (SELECT COUNT(*) FROM notes WHERE course_id = c.id AND status = 'active') AS notes_count,
             (SELECT COUNT(*) FROM assignments WHERE course_id = c.id AND status = 'active') AS assign_count
      FROM courses c
      INNER JOIN users u ON c.lecturer_id = u.id
-     $where
+     WHERE $where_sql
      ORDER BY c.created_at DESC
-     LIMIT $per_page OFFSET $offset"
-);
+     LIMIT ?, ?";
+$stmt = mysqli_prepare($conn, $list_sql);
+$all_types  = $types . "ii";
+$all_params = array_merge($params, [$offset, $per_page]);
+mysqli_stmt_bind_param($stmt, $all_types, ...$all_params);
+mysqli_stmt_execute($stmt);
+$courses_result = mysqli_stmt_get_result($stmt);
+$courses_list = [];
+while ($row = mysqli_fetch_assoc($courses_result)) {
+    $courses_list[] = $row;
+}
 
 // ── Fetch lecturers for dropdowns ────────────────────────
-$lecturers = mysqli_query($conn,
+$lecturers_result = mysqli_query($conn,
     "SELECT id, name FROM users WHERE role = 'lecturer' AND status = 'active' ORDER BY name ASC"
 );
 $lecturers_arr = [];
-while ($l = mysqli_fetch_assoc($lecturers)) {
+while ($l = mysqli_fetch_assoc($lecturers_result)) {
     $lecturers_arr[] = $l;
 }
 
 // ── Summary counts ───────────────────────────────────────
-$total_courses  = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as t FROM courses"))['t'];
-$active_courses = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as t FROM courses WHERE status='active'"))['t'];
+$total_courses    = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as t FROM courses"))['t'];
+$active_courses   = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as t FROM courses WHERE status='active'"))['t'];
 $inactive_courses = $total_courses - $active_courses;
+
+// ── Fetch admin info ─────────────────────────────────────
+$stmt = mysqli_prepare($conn, "SELECT * FROM users WHERE id = ?");
+mysqli_stmt_bind_param($stmt, "i", $admin_id);
+mysqli_stmt_execute($stmt);
+$admin = mysqli_fetch_assoc(mysqli_stmt_get_result($stmt));
+
+// ── Query string helper ──────────────────────────────────
+function buildQS($overrides = []) {
+    $base = [
+        'search' => $_GET['search'] ?? '',
+        'status' => $_GET['status'] ?? '',
+        'page'   => $_GET['page'] ?? 1,
+    ];
+    $merged = array_merge($base, $overrides);
+    return http_build_query(array_filter($merged, fn($v) => $v !== '' && $v !== null));
+}
+$current_qs = buildQS();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -665,17 +814,17 @@ $inactive_courses = $total_courses - $active_courses;
     <div class="page-body">
 
         <!-- Alerts -->
-        <?php if ($success): ?>
+        <?php if ($flash_success): ?>
             <div class="alert-success-glass">
                 <i class="bi bi-check-circle-fill"></i>
-                <?= htmlspecialchars($success) ?>
+                <?= htmlspecialchars($flash_success) ?>
             </div>
         <?php endif; ?>
 
-        <?php if ($error): ?>
+        <?php if ($flash_error): ?>
             <div class="alert-error-glass">
                 <i class="bi bi-exclamation-triangle-fill"></i>
-                <?= htmlspecialchars($error) ?>
+                <?= htmlspecialchars($flash_error) ?>
             </div>
         <?php endif; ?>
 
@@ -769,8 +918,8 @@ $inactive_courses = $total_courses - $active_courses;
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if (mysqli_num_rows($courses) > 0): ?>
-                            <?php $sn = $offset + 1; while ($course = mysqli_fetch_assoc($courses)): ?>
+                        <?php if (count($courses_list) > 0): ?>
+                            <?php $sn = $offset + 1; foreach ($courses_list as $course): ?>
                                 <tr>
                                     <td style="color:var(--muted)"><?= $sn++ ?></td>
 
@@ -844,24 +993,33 @@ $inactive_courses = $total_courses - $active_courses;
                                             </button>
 
                                             <!-- Toggle Status -->
-                                            <a href="manage_courses.php?toggle=<?= $course['id'] ?><?= $search ? '&search='.$search : '' ?>"
-                                               class="btn-icon btn-toggle"
-                                               title="<?= $course['status'] === 'active' ? 'Deactivate' : 'Activate' ?>"
-                                               onclick="return confirm('Change course status?')">
-                                                <i class="bi bi-<?= $course['status'] === 'active' ? 'pause-circle' : 'play-circle' ?>"></i>
-                                            </a>
+                                            <form method="POST" style="display:inline;">
+                                                <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
+                                                <input type="hidden" name="action" value="toggle_status">
+                                                <input type="hidden" name="course_id" value="<?= $course['id'] ?>">
+                                                <input type="hidden" name="redirect_qs" value="<?= htmlspecialchars($current_qs) ?>">
+                                                <button type="submit" class="btn-icon btn-toggle"
+                                                        title="<?= $course['status'] === 'active' ? 'Deactivate' : 'Activate' ?>"
+                                                        onclick="return confirm('Change course status?')">
+                                                    <i class="bi bi-<?= $course['status'] === 'active' ? 'pause-circle' : 'play-circle' ?>"></i>
+                                                </button>
+                                            </form>
 
                                             <!-- Delete -->
-                                            <a href="manage_courses.php?delete=<?= $course['id'] ?><?= $search ? '&search='.$search : '' ?>"
-                                               class="btn-icon btn-delete"
-                                               title="Delete"
-                                               onclick="return confirm('Delete this course? This will also remove all enrollments, notes and assignments.')">
-                                                <i class="bi bi-trash"></i>
-                                            </a>
+                                            <form method="POST" style="display:inline;"
+                                                  onsubmit="return confirm('Delete this course? This will also remove all enrollments, notes and assignments.')">
+                                                <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
+                                                <input type="hidden" name="action" value="delete_course">
+                                                <input type="hidden" name="course_id" value="<?= $course['id'] ?>">
+                                                <input type="hidden" name="redirect_qs" value="<?= htmlspecialchars($current_qs) ?>">
+                                                <button type="submit" class="btn-icon btn-delete" title="Delete">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>
-                            <?php endwhile; ?>
+                            <?php endforeach; ?>
                         <?php else: ?>
                             <tr>
                                 <td colspan="7">
@@ -886,17 +1044,17 @@ $inactive_courses = $total_courses - $active_courses;
                         of <?= $total_rows ?> courses
                     </div>
                     <div class="pagination">
-                        <a href="?page=<?= max(1, $page-1) ?>&search=<?= $search ?>&status=<?= $filter_status ?>"
+                        <a href="?<?= buildQS(['page' => max(1, $page - 1)]) ?>"
                            class="page-btn <?= $page <= 1 ? 'disabled' : '' ?>">
                             <i class="bi bi-chevron-left"></i>
                         </a>
                         <?php for ($i = 1; $i <= $total_pages; $i++): ?>
-                            <a href="?page=<?= $i ?>&search=<?= $search ?>&status=<?= $filter_status ?>"
+                            <a href="?<?= buildQS(['page' => $i]) ?>"
                                class="page-btn <?= $i == $page ? 'active' : '' ?>">
                                 <?= $i ?>
                             </a>
                         <?php endfor; ?>
-                        <a href="?page=<?= min($total_pages, $page+1) ?>&search=<?= $search ?>&status=<?= $filter_status ?>"
+                        <a href="?<?= buildQS(['page' => min($total_pages, $page + 1)]) ?>"
                            class="page-btn <?= $page >= $total_pages ? 'disabled' : '' ?>">
                             <i class="bi bi-chevron-right"></i>
                         </a>
@@ -921,6 +1079,8 @@ $inactive_courses = $total_courses - $active_courses;
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST">
+                <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
+                <input type="hidden" name="action" value="add_course">
                 <div class="modal-body">
                     <div class="row g-3">
                         <div class="col-md-5">
@@ -984,7 +1144,10 @@ $inactive_courses = $total_courses - $active_courses;
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST">
+                <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
+                <input type="hidden" name="action" value="edit_course">
                 <input type="hidden" name="course_id" id="edit_course_id">
+                <input type="hidden" name="redirect_qs" id="edit_redirect_qs" value="<?= htmlspecialchars($current_qs) ?>">
                 <div class="modal-body">
                     <div class="row g-3">
                         <div class="col-md-5">
@@ -1033,7 +1196,7 @@ $inactive_courses = $total_courses - $active_courses;
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-cancel" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" name="edit_course" class="btn-submit"
+                    <button type="submit" class="btn-submit"
                             style="background:var(--blue);">
                         <i class="bi bi-check-circle me-1"></i> Save Changes
                     </button>
@@ -1093,19 +1256,6 @@ $inactive_courses = $total_courses - $active_courses;
             this.value = this.value.toUpperCase();
         });
     });
-
-    // ── Auto open add modal on error ─────────────────────
-    <?php if ($error && isset($_POST['add_course'])): ?>
-        window.addEventListener('load', () => {
-            new bootstrap.Modal(document.getElementById('addCourseModal')).show();
-        });
-    <?php endif; ?>
-
-    <?php if ($error && isset($_POST['edit_course'])): ?>
-        window.addEventListener('load', () => {
-            new bootstrap.Modal(document.getElementById('editCourseModal')).show();
-        });
-    <?php endif; ?>
 </script>
 </body>
 </html>
